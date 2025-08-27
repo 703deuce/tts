@@ -119,25 +119,70 @@ class VoiceCloningService {
    */
   async getUserVoices(userId?: string): Promise<ClonedVoice[]> {
     try {
-      // First try to get from Firebase Storage
+      // Always fetch from Firebase Storage for SaaS consistency
       const userFolder = `${this.VOICE_FOLDER}/${userId || 'anonymous'}`;
       const folderRef = ref(storage, userFolder);
       
-      try {
-        const result = await listAll(folderRef);
-        console.log('Firebase Storage files found:', result.items.length);
-        
-        // For now, return voices from localStorage since we need to implement
-        // a way to fetch metadata from Firebase Storage or Firestore
-        // In a production app, you'd store metadata in Firestore
-        return this.getLocalClonedVoices();
-      } catch (firebaseError) {
-        console.log('Firebase Storage not accessible, using localStorage:', firebaseError);
-        return this.getLocalClonedVoices();
+      const result = await listAll(folderRef);
+      console.log(`📁 Firebase Storage: Found ${result.items.length} files`);
+      
+      // Filter for WAV files and build voice metadata
+      const wavFiles = result.items.filter(item => item.name.endsWith('.wav'));
+      console.log(`🎵 Found ${wavFiles.length} WAV files`);
+      
+      const voices: ClonedVoice[] = [];
+      
+      for (const wavFile of wavFiles) {
+        try {
+          const fileName = wavFile.name;
+          const voiceId = fileName.replace('.wav', '');
+          const downloadURL = await getDownloadURL(wavFile);
+          
+          // Extract name from filename (remove the cloned_ timestamp_random part)
+          const nameMatch = fileName.match(/^cloned_\d+_[a-z0-9]+_(.+?)\.wav$/);
+          const voiceName = nameMatch ? nameMatch[1].replace(/_/g, ' ') : 'Custom Voice';
+          
+          const clonedVoice: ClonedVoice = {
+            id: voiceId,
+            name: voiceName,
+            description: 'Custom cloned voice',
+            originalFileName: fileName,
+            firebasePath: wavFile.fullPath,
+            downloadURL: downloadURL,
+            uploadedAt: new Date(), // We'll need to store this in Firestore later
+            fileSize: 0, // We'll need to store this in Firestore later
+            status: 'ready'
+          };
+          
+          voices.push(clonedVoice);
+          console.log(`✅ Built voice metadata for: ${voiceName}`);
+        } catch (fileError) {
+          console.warn(`⚠️ Failed to build metadata for ${wavFile.name}:`, fileError);
+        }
       }
+      
+      console.log(`🎤 Successfully loaded ${voices.length} voices from Firebase Storage`);
+      return voices;
     } catch (error) {
-      console.error('Failed to fetch user voices:', error);
-      return this.getLocalClonedVoices();
+      console.error('Failed to fetch user voices from Firebase:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Ensure voices are loaded and available
+   * This method should be called when pages mount to ensure voices are loaded
+   */
+  async ensureVoicesLoaded(): Promise<ClonedVoice[]> {
+    try {
+      // Always fetch from Firebase Storage for SaaS consistency
+      console.log('🔄 Fetching voices from Firebase Storage...');
+      const voices = await this.getUserVoices();
+      console.log(`✅ Successfully loaded ${voices.length} voices from Firebase`);
+      return voices;
+    } catch (error) {
+      console.warn('Failed to ensure voices are loaded:', error);
+      return [];
     }
   }
 
@@ -297,7 +342,9 @@ class VoiceCloningService {
    * Get all voices from localStorage
    */
   getLocalClonedVoices(): ClonedVoice[] {
-    return this.getLocalVoices();
+    const voices = this.getLocalVoices();
+    console.log(`📱 getLocalClonedVoices: Found ${voices.length} voices in localStorage`);
+    return voices;
   }
 
   /**
@@ -322,86 +369,15 @@ class VoiceCloningService {
   }
 
   /**
-   * Refresh the voice list by clearing cache and re-fetching
+   * Refresh the voice list by re-fetching from Firebase Storage
    */
   async refreshVoiceList(): Promise<void> {
     try {
-      // Instead of just clearing cache, rebuild the voice list from Firebase
-      console.log('🔄 Refreshing voice list from Firebase...');
+      console.log('🔄 Refreshing voice list from Firebase Storage...');
       
-      // Get all voices from Firebase Storage
-      const userFolder = `${this.VOICE_FOLDER}/anonymous`;
-      const folderRef = ref(storage, userFolder);
-      
-      try {
-        const result = await listAll(folderRef);
-        console.log(`📁 Found ${result.items.length} files in Firebase Storage`);
-        
-        // Filter for WAV files and rebuild voice metadata
-        const wavFiles = result.items.filter(item => item.name.endsWith('.wav'));
-        console.log(`🎵 Found ${wavFiles.length} WAV files`);
-        
-        // Get existing voices from localStorage to preserve metadata
-        const existingVoices = this.getLocalVoices();
-        const existingVoiceMap = new Map(existingVoices.map(v => [v.id, v]));
-        
-        // Clear existing localStorage to prevent duplicates
-        localStorage.removeItem('clonedVoices');
-        
-        // Rebuild voice metadata for each WAV file
-        for (const wavFile of wavFiles) {
-          try {
-            // Extract voice info from filename
-            const fileName = wavFile.name;
-            // The voiceId is the full filename without .wav extension
-            const voiceId = fileName.replace('.wav', '');
-            
-            // Get download URL
-            const downloadURL = await getDownloadURL(wavFile);
-            
-            // Check if we have existing metadata for this voice
-            const existingVoice = existingVoiceMap.get(voiceId);
-            
-            let voiceName: string;
-            let description: string;
-            
-            if (existingVoice) {
-              // Use existing metadata
-              voiceName = existingVoice.name;
-              description = existingVoice.description;
-              console.log(`✅ Using existing metadata for: ${voiceName}`);
-            } else {
-              // Extract name from filename (remove the cloned_ timestamp_random part)
-              const nameMatch = fileName.match(/^cloned_\d+_[a-z0-9]+_(.+?)\.wav$/);
-              voiceName = nameMatch ? nameMatch[1].replace(/_/g, ' ') : 'Custom Voice';
-              description = 'Custom cloned voice';
-              console.log(`🆕 Created new metadata for: ${voiceName}`);
-            }
-            
-            const clonedVoice: ClonedVoice = {
-              id: voiceId,
-              name: voiceName,
-              description: description,
-              originalFileName: fileName,
-              firebasePath: wavFile.fullPath,
-              downloadURL: downloadURL,
-              uploadedAt: existingVoice?.uploadedAt || new Date(),
-              fileSize: existingVoice?.fileSize || 0,
-              status: 'ready'
-            };
-            
-            // Save to localStorage
-            this.saveVoiceMetadata(clonedVoice);
-            console.log(`✅ Rebuilt voice metadata for: ${voiceName}`);
-          } catch (fileError) {
-            console.warn(`⚠️ Failed to rebuild metadata for ${wavFile.name}:`, fileError);
-          }
-        }
-        
-        console.log('✅ Voice list refresh completed');
-      } catch (firebaseError) {
-        console.warn('⚠️ Firebase Storage not accessible during refresh:', firebaseError);
-      }
+      // Simply call getUserVoices to refresh the list
+      const voices = await this.getUserVoices();
+      console.log(`✅ Voice list refresh completed: ${voices.length} voices found`);
     } catch (error) {
       console.warn('Failed to refresh voice list:', error);
     }

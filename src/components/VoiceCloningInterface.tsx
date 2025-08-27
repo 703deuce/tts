@@ -53,9 +53,8 @@ export default function VoiceCloningInterface({ onVoiceCloned }: VoiceCloningInt
   }, []);
 
   const loadClonedVoices = async () => {
-    // Refresh voice list to get latest voices
-    await voiceCloningService.refreshVoiceList();
-    const voices = voiceCloningService.getLocalClonedVoices();
+    // Always fetch voices directly from Firebase Storage
+    const voices = await voiceCloningService.getUserVoices();
     setClonedVoices(voices);
   };
 

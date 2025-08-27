@@ -6,6 +6,7 @@ export interface Voice {
   gender: string;
   category: string;
   isMultiSpeaker?: boolean;
+  downloadURL?: string; // Firebase download URL for custom voices
 }
 
 /**

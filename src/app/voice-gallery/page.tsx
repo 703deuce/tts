@@ -16,6 +16,8 @@ interface Voice {
   description: string;
   isPremium?: boolean;
   isNew?: boolean;
+  downloadURL?: string;
+  isMultiSpeaker?: boolean;
 }
 
 export default function VoiceGallery() {
@@ -30,8 +32,8 @@ export default function VoiceGallery() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Refresh voice list to get latest cloned voices
-    voiceCloningService.refreshVoiceList();
+    // Ensure voices are loaded to get latest cloned voices
+    voiceCloningService.ensureVoicesLoaded();
     loadVoices();
   }, []);
 
@@ -255,8 +257,10 @@ export default function VoiceGallery() {
                 language={voice.language}
                 category={voice.category}
                 description={voice.description}
-                isPremium={voice.isPremium}
-                isNew={voice.isNew}
+                isPremium={voice.isPremium || false}
+                isNew={voice.isNew || false}
+                downloadURL={voice.downloadURL}
+                isMultiSpeaker={voice.isMultiSpeaker || false}
               />
             ))}
           </div>
@@ -274,7 +278,9 @@ const VoiceCard = ({
   category, 
   description,
   isPremium = false,
-  isNew = false
+  isNew = false,
+  downloadURL,
+  isMultiSpeaker = false
 }: {
   id: string;
   name: string;
@@ -284,18 +290,24 @@ const VoiceCard = ({
   description: string;
   isPremium?: boolean;
   isNew?: boolean;
+  downloadURL?: string;
+  isMultiSpeaker?: boolean;
 }) => {
   const router = useRouter();
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
   const getAudioPath = (voiceId: string) => {
-    // For custom voices, we don't have preview audio files
-    if (voiceId.startsWith('cloned_')) {
-      return null;
+    // For custom voices, use the Firebase download URL
+    if (voiceId.startsWith('cloned_') && downloadURL) {
+      return downloadURL;
     }
     
+    // For regular voices, try WAV first, then MP3 as fallback
     const wavPath = `/voices/${voiceId}.wav`;
+    const mp3Path = `/voices/${voiceId}.mp3`;
+    
+    // Return WAV path - we'll handle the fallback in the preview function
     return wavPath; 
   };
 
@@ -307,32 +319,128 @@ const VoiceCard = ({
       return;
     }
 
-    // For custom voices, show a message instead of playing
-    if (id.startsWith('cloned_')) {
-      alert('Custom voices don\'t have preview audio. Use the "Use Voice" button to generate speech with this voice.');
-      return;
-    }
-
     try {
       const audioPath = getAudioPath(id);
-      if (!audioPath) return;
+      if (!audioPath) {
+        console.warn('No audio path available for voice:', id);
+        return;
+      }
       
-      const audio = new Audio(audioPath);
+      let audio: HTMLAudioElement;
       
-      audio.onerror = () => {
-        const mp3Path = `/voices/${id}.mp3`;
-        audio.src = mp3Path;
-      };
-      
-      audio.onended = () => {
-        setIsPlaying(false);
-        setAudioElement(null);
-      };
-      
-      audio.onloadstart = () => setIsPlaying(true);
-      
-      setAudioElement(audio);
-      await audio.play();
+             if (id.startsWith('cloned_') && downloadURL) {
+         // For cloned voices, try to play directly first, then fallback to blob if needed
+         try {
+           // First try to play the Firebase URL directly
+           audio = new Audio(downloadURL);
+           
+           // Set up event handlers
+           audio.onended = () => {
+             setIsPlaying(false);
+             setAudioElement(null);
+           };
+           
+           // Wait for audio to be loaded before playing
+           audio.oncanplaythrough = async () => {
+             console.log('Audio loaded and ready to play');
+             try {
+               await audio.play();
+             } catch (playError) {
+               console.error('Failed to play loaded audio:', playError);
+               setIsPlaying(false);
+             }
+           };
+           
+           audio.onerror = async () => {
+             console.log('Direct playback failed, trying blob approach...');
+             
+             // Fallback: fetch as blob
+             try {
+               const response = await fetch(downloadURL, {
+                 mode: 'cors',
+                 credentials: 'omit'
+               });
+               
+               if (!response.ok) {
+                 throw new Error(`Failed to fetch audio: ${response.status}`);
+               }
+               
+               const audioBlob = await response.blob();
+               const audioUrl = URL.createObjectURL(audioBlob);
+               
+               // Create new audio element with blob URL
+               const blobAudio = new Audio(audioUrl);
+               blobAudio.onended = () => {
+                 setIsPlaying(false);
+                 setAudioElement(null);
+                 URL.revokeObjectURL(audioUrl);
+               };
+               
+               blobAudio.onerror = () => {
+                 console.error('Blob playback also failed');
+                 setIsPlaying(false);
+                 URL.revokeObjectURL(audioUrl);
+               };
+               
+               blobAudio.oncanplaythrough = async () => {
+                 console.log('Blob audio loaded and ready to play');
+                 try {
+                   await blobAudio.play();
+                 } catch (playError) {
+                   console.error('Failed to play blob audio:', playError);
+                   setIsPlaying(false);
+                   URL.revokeObjectURL(audioUrl);
+                 }
+               };
+               
+               blobAudio.onloadstart = () => setIsPlaying(true);
+               setAudioElement(blobAudio);
+               
+             } catch (blobError) {
+               console.error('Blob approach failed:', blobError);
+               setIsPlaying(false);
+               return;
+             }
+           };
+           
+         } catch (directError) {
+           console.error('Direct audio creation failed:', directError);
+           setIsPlaying(false);
+           return;
+         }
+                    } else {
+         // For regular voices, try WAV first, then MP3 as fallback
+         audio = new Audio(audioPath);
+         
+         // Set up event handlers for regular voices
+         audio.onloadstart = () => setIsPlaying(true);
+         audio.onended = () => {
+           setIsPlaying(false);
+           setAudioElement(null);
+         };
+         
+         // Try MP3 fallback if WAV fails
+         audio.onerror = () => {
+           console.log('WAV failed, trying MP3 fallback...');
+           const mp3Path = `/voices/${id}.mp3`;
+           audio.src = mp3Path;
+         };
+         
+         // For regular voices, play immediately since they're local files
+         setAudioElement(audio);
+         try {
+           await audio.play();
+         } catch (playError) {
+           console.error('Failed to play regular voice audio:', playError);
+           setIsPlaying(false);
+         }
+         return; // Exit early for regular voices
+       }
+       
+       // Only set these for cloned voices
+       audio.onloadstart = () => setIsPlaying(true);
+       setAudioElement(audio);
+       // Don't call play() here - wait for oncanplaythrough event
     } catch (error) {
       console.error('Error playing audio:', error);
       setIsPlaying(false);
@@ -403,13 +511,12 @@ const VoiceCard = ({
       <div className="flex items-center space-x-2">
         <button 
           onClick={handlePreview}
-          disabled={isPlaying || isCustomVoice}
+          disabled={isPlaying}
           className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg transition-colors ${
             isPlaying ? 'bg-orange-50 border-orange-300' : 
-            isCustomVoice ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' :
             'hover:bg-gray-50'
           }`}
-          title={isCustomVoice ? 'Custom voices don\'t have preview audio' : 'Preview voice'}
+          title="Preview voice"
         >
           {isPlaying ? (
             <>
@@ -419,7 +526,7 @@ const VoiceCard = ({
           ) : (
             <>
               <Play className="w-4 h-4" />
-              <span>{isCustomVoice ? 'No Preview' : 'Preview'}</span>
+              <span>Preview</span>
             </>
           )}
         </button>

@@ -35,9 +35,9 @@ export default function TTSPage() {
     }
   }, [searchParams]);
 
-  // Refresh voice list on every page load
+  // Ensure voices are loaded on every page load
   useEffect(() => {
-    voiceCloningService.refreshVoiceList();
+    voiceCloningService.ensureVoicesLoaded();
   }, []);
 
   const [generations, setGenerations] = useState([

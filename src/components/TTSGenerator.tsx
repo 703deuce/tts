@@ -52,8 +52,8 @@ export default function TTSGenerator({ onGenerationComplete, defaultVoice }: TTS
 
   // Load voices on component mount
   useEffect(() => {
-    // Refresh voice list to get latest cloned voices
-    voiceCloningService.refreshVoiceList();
+    // Ensure voices are loaded to get latest cloned voices
+    voiceCloningService.ensureVoicesLoaded();
     loadVoices();
   }, []);
 

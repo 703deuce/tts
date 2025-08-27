@@ -28,7 +28,7 @@ export default function VoiceClonePage() {
   };
 
   useEffect(() => {
-    voiceCloningService.refreshVoiceList();
+    voiceCloningService.ensureVoicesLoaded();
   }, []);
 
   return (

@@ -73,10 +73,7 @@ class TTSService {
       // Get regular voices
       const regularVoices = ALL_VOICES;
       
-      // Refresh voice list to get latest cloned voices
-      await voiceCloningService.refreshVoiceList();
-      
-      // Get custom cloned voices
+      // Get custom cloned voices directly from Firebase Storage
       const customVoices = await voiceCloningService.getUserVoices();
       
       // Convert custom voices to Voice format
@@ -88,7 +85,8 @@ class TTSService {
         category: 'Custom Voices',
         description: clonedVoice.description || `Custom cloned voice: ${clonedVoice.name}`,
         isPremium: false,
-        isNew: true
+        isNew: true,
+        downloadURL: clonedVoice.downloadURL // Include Firebase download URL for preview
       }));
       
       // Combine both voice lists
@@ -165,9 +163,7 @@ class TTSService {
    * Get all available categories (including custom voices)
    */
   async getAvailableCategories(): Promise<string[]> {
-    // Refresh voice list to get latest cloned voices
-    await voiceCloningService.refreshVoiceList();
-    
+    // Get all voices directly from Firebase Storage
     const allVoices = await this.getAvailableVoices();
     const categories = [...new Set(allVoices.map(voice => voice.category))];
     return ['All Voices', ...categories.sort()];
