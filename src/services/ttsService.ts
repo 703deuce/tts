@@ -15,7 +15,7 @@ export interface TTSRequest {
   seed?: number;
   ref_audio_name?: string;
   ref_audio_in_system_message?: boolean;
-  chunk_method?: 'word' | 'speaker';
+  chunk_method?: 'word' | 'speaker' | 'sentence' | 'none';
   chunk_max_word_num?: number;
   chunk_max_num_turns?: number;
   generation_chunk_buffer_size?: number;
@@ -420,7 +420,7 @@ class TTSService {
           temperature: 0.35,
           top_p: 0.96,
           top_k: 50,
-          chunk_method: 'word' as const,
+          chunk_method: 'sentence' as const,
           chunk_max_word_num: 50,
           generation_chunk_buffer_size: 2,
           scene_description: 'Calm, engaging narration with natural pacing'
@@ -433,6 +433,7 @@ class TTSService {
           temperature: 0.4,
           top_p: 0.95,
           top_k: 60,
+          chunk_method: 'none' as const,
           scene_description: 'Professional news broadcast with clear, authoritative delivery'
         }
       },
@@ -446,6 +447,17 @@ class TTSService {
           chunk_method: 'word' as const,
           chunk_max_word_num: 60,
           scene_description: 'Clear educational narration with steady pace'
+        }
+      },
+      conversation: {
+        name: 'Natural Conversation',
+        description: 'Casual, natural speech patterns',
+        config: {
+          temperature: 0.7,
+          top_p: 0.98,
+          top_k: 80,
+          chunk_method: 'none' as const,
+          scene_description: 'Natural, casual conversation with authentic speech patterns'
         }
       }
     };

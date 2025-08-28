@@ -43,11 +43,17 @@ export default function TTSGenerator({ onGenerationComplete, defaultVoice }: TTS
     top_k: 100,
     max_new_tokens: 1024,
     scene_description: '',
-    chunk_method: 'word' as 'word' | 'speaker',
+    chunk_method: 'none' as 'word' | 'speaker' | 'sentence' | 'none',
     chunk_max_word_num: 50,
     chunk_max_num_turns: 2,
     generation_chunk_buffer_size: 2,
-    ref_audio_in_system_message: false
+    ref_audio_in_system_message: false,
+    // Experimental features
+    experimental_features: {
+      humming: false,
+      bgm: false
+    },
+    ras_win_len: 0
   });
 
   // Load voices on component mount
@@ -109,25 +115,42 @@ export default function TTSGenerator({ onGenerationComplete, defaultVoice }: TTS
     }
   };
 
-  const handleGenerate = async () => {
-    try {
-      const request = {
-        text: isMultiSpeaker ? ttsService.formatMultiSpeakerText(text) : text,
-        ref_audio_name: selectedVoice,
-        ...settings,
-        ref_audio_in_system_message: isMultiSpeaker || settings.ref_audio_in_system_message
-      };
+     const handleGenerate = async () => {
+     try {
+       // Build the TTS request with all available parameters
+       const request: any = {
+         text: isMultiSpeaker ? ttsService.formatMultiSpeakerText(text) : text,
+         ...settings,
+         ref_audio_in_system_message: isMultiSpeaker || settings.ref_audio_in_system_message
+       };
 
-      console.log('🚀 TTS Request:', request);
-      await generateSpeech(request);
+       // Handle different voice modes
+       if (settings.experimental_features.humming) {
+         // For humming mode, don't specify ref_audio_name
+         request.ras_win_len = 0;
+       } else if (settings.experimental_features.bgm) {
+         // For BGM mode, enable ref_audio_in_system_message
+         request.ref_audio_in_system_message = true;
+       } else {
+         // Regular voice clone mode
+         request.ref_audio_name = selectedVoice;
+       }
 
-      if (onGenerationComplete && state.result) {
-        onGenerationComplete(state.result);
-      }
-    } catch (error) {
-      console.error('TTS generation failed:', error);
-    }
-  };
+       // Add experimental feature flags
+       if (settings.experimental_features.humming || settings.experimental_features.bgm) {
+         request.experimental_mode = true;
+       }
+
+       console.log('🚀 TTS Request:', request);
+       await generateSpeech(request);
+
+       if (onGenerationComplete && state.result) {
+         onGenerationComplete(state.result);
+       }
+     } catch (error) {
+       console.error('TTS generation failed:', error);
+     }
+   };
 
   const handlePlayPause = () => {
     if (isPlaying) {
@@ -226,59 +249,123 @@ export default function TTSGenerator({ onGenerationComplete, defaultVoice }: TTS
           </div>
         </div>
         
-        <textarea
-          value={text}
-          onChange={(e) => handleTextChange(e.target.value)}
-          placeholder="Enter your text here... Use [SPEAKER0] and [SPEAKER1] tags for multi-speaker content."
-          className="w-full h-40 p-4 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-        />
+                 <textarea
+           value={text}
+           onChange={(e) => handleTextChange(e.target.value)}
+           placeholder={isMultiSpeaker ? 
+             "Enter your text here...\n\nExample:\n[SPEAKER0] Hello, how are you today?\n[SPEAKER1] I'm doing great, thank you for asking!\n[SPEAKER0] That's wonderful to hear." :
+             "Enter your text here... Use [SPEAKER0] and [SPEAKER1] tags for multi-speaker content."
+           }
+           className="w-full h-40 p-4 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+         />
         
-        <div className="flex items-center justify-between mt-4">
-          <div className="text-sm text-gray-500">
-            Characters: <span className="font-medium">{text.length}</span>
-            {text.length > 1000 && (
-              <span className="ml-2 text-amber-600">• Consider chunking for long text</span>
-            )}
-          </div>
-          <div className="flex items-center space-x-2">
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={isMultiSpeaker}
-                onChange={(e) => setIsMultiSpeaker(e.target.checked)}
-                className="w-4 h-4 text-orange-500 rounded"
-              />
-              <span className="text-sm text-gray-700">Multi-Speaker</span>
-            </label>
-          </div>
-        </div>
+                 <div className="flex items-center justify-between mt-4">
+           <div className="text-sm text-gray-500">
+             Characters: <span className="font-medium">{text.length}</span>
+             {text.length > 1000 && (
+               <span className="ml-2 text-amber-600">• Consider chunking for long text</span>
+             )}
+           </div>
+           <div className="flex items-center space-x-4">
+             <label className="flex items-center space-x-2">
+               <input
+                 type="checkbox"
+                 checked={isMultiSpeaker}
+                 onChange={(e) => setIsMultiSpeaker(e.target.checked)}
+                 className="w-4 h-4 text-orange-500 rounded"
+               />
+               <span className="text-sm text-gray-700">Multi-Speaker</span>
+             </label>
+             
+             {isMultiSpeaker && (
+               <div className="flex items-center space-x-4 text-xs text-gray-600">
+                 <span>Use [SPEAKER0], [SPEAKER1], etc. in your text</span>
+                 <span>•</span>
+                 <span>Supports up to 4 speakers</span>
+               </div>
+             )}
+           </div>
+         </div>
       </div>
 
       {/* Voice Selection */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Voice Selection</h3>
         
-        {isMultiSpeaker ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Multi-Speaker Combination
-            </label>
-            <select
-              value={selectedVoice}
-              onChange={(e) => setSelectedVoice(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
-            >
-              {multiSpeakerCombinations.map((combo) => (
-                <option key={combo.voices} value={combo.voices}>
-                  {combo.name} - {combo.description}
-                </option>
-              ))}
-            </select>
-            <p className="mt-2 text-sm text-gray-500">
-              Use [SPEAKER0] and [SPEAKER1] tags in your text to assign different speakers.
-            </p>
-          </div>
-        ) : (
+                 {isMultiSpeaker ? (
+           <div className="space-y-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-2">
+                 Multi-Speaker Combination
+               </label>
+               <select
+                 value={selectedVoice}
+                 onChange={(e) => setSelectedVoice(e.target.value)}
+                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+               >
+                 {multiSpeakerCombinations.map((combo) => (
+                   <option key={combo.voices} value={combo.voices}>
+                     {combo.name} - {combo.description}
+                   </option>
+                 ))}
+               </select>
+               <p className="mt-2 text-sm text-gray-500">
+                 Use [SPEAKER0] and [SPEAKER1] tags in your text to assign different speakers.
+               </p>
+             </div>
+             
+             {/* Multi-Speaker Advanced Options */}
+             <div className="bg-gray-50 rounded-lg p-4">
+               <h4 className="text-sm font-medium text-gray-700 mb-3">🎭 Multi-Speaker Settings</h4>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div>
+                   <label className="flex items-center space-x-2 mb-2">
+                     <input
+                       type="checkbox"
+                       checked={settings.ref_audio_in_system_message}
+                       onChange={(e) => setSettings(prev => ({ ...prev, ref_audio_in_system_message: e.target.checked }))}
+                       className="w-4 h-4 text-orange-500 rounded"
+                     />
+                     <span className="text-sm text-gray-700">Reference Audio in System Message</span>
+                   </label>
+                   <p className="text-xs text-gray-500">Enable for better multi-speaker voice consistency</p>
+                 </div>
+                 
+                 <div>
+                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                     Speaker Chunking: {settings.chunk_method === 'speaker' ? 'Enabled' : 'Disabled'}
+                   </label>
+                   <button
+                     onClick={() => setSettings(prev => ({ 
+                       ...prev, 
+                       chunk_method: prev.chunk_method === 'speaker' ? 'none' : 'speaker' 
+                     }))}
+                     className={`px-3 py-1 text-xs rounded ${
+                       settings.chunk_method === 'speaker'
+                         ? 'bg-orange-500 text-white'
+                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                     }`}
+                   >
+                     {settings.chunk_method === 'speaker' ? 'Disable' : 'Enable'}
+                   </button>
+                   <p className="text-xs text-gray-500 mt-1">Cluster segments by speaker turns for better dialog flow</p>
+                 </div>
+               </div>
+               
+               <div className="mt-3 p-3 bg-blue-50 rounded border border-blue-200">
+                 <div className="text-xs text-blue-800">
+                   <strong>💡 Multi-Speaker Tips:</strong>
+                   <ul className="mt-1 space-y-1">
+                     <li>• Use [SPEAKER0] for the first speaker, [SPEAKER1] for the second, etc.</li>
+                     <li>• Each speaker tag should be on its own line for best results</li>
+                     <li>• Enable speaker chunking for long conversations</li>
+                     <li>• Set chunk_max_num_turns in Advanced Settings for speaker control</li>
+                   </ul>
+                 </div>
+               </div>
+             </div>
+           </div>
+         ) : (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Select Voice ({voices.length} available)
@@ -427,24 +514,155 @@ export default function TTSGenerator({ onGenerationComplete, defaultVoice }: TTS
               <label className="block text-sm font-medium text-gray-700 mb-2">Chunk Method</label>
               <select
                 value={settings.chunk_method}
-                onChange={(e) => setSettings(prev => ({ ...prev, chunk_method: e.target.value as 'word' | 'speaker' }))}
+                onChange={(e) => setSettings(prev => ({ ...prev, chunk_method: e.target.value as 'word' | 'speaker' | 'sentence' | 'none' }))}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
-                <option value="word">Word</option>
-                <option value="speaker">Speaker</option>
+                <option value="none">None (Default)</option>
+                <option value="word">Word - Granular prosody control</option>
+                <option value="sentence">Sentence - Stable generation</option>
+                <option value="speaker">Speaker - Dialog clustering</option>
               </select>
+              <div className="text-xs text-gray-500 mt-1">
+                {settings.chunk_method === 'word' && 'Highly granular prosody and voice control'}
+                {settings.chunk_method === 'sentence' && 'Stable generation per sentence'}
+                {settings.chunk_method === 'speaker' && 'Clusters segments by speaker turns'}
+                {settings.chunk_method === 'none' && 'No chunking - default behavior'}
+              </div>
             </div>
 
-            <div className="md:col-span-2 lg:col-span-3">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Scene Description</label>
-              <input
-                type="text"
-                value={settings.scene_description}
-                onChange={(e) => setSettings(prev => ({ ...prev, scene_description: e.target.value }))}
-                placeholder="e.g., Professional podcast studio with energetic hosts"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
+            {/* Conditional chunking parameters based on method */}
+            {settings.chunk_method === 'word' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Words per Chunk ({settings.chunk_max_word_num})
+                </label>
+                <input
+                  type="range"
+                  min="20"
+                  max="100"
+                  step="5"
+                  value={settings.chunk_max_word_num}
+                  onChange={(e) => setSettings(prev => ({ ...prev, chunk_max_word_num: parseInt(e.target.value) }))}
+                  className="w-full"
+                />
+                <div className="text-xs text-gray-500 mt-1">Maximum words per chunk for word-based chunking</div>
+              </div>
+            )}
+
+            {settings.chunk_method === 'speaker' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Max Speaker Turns ({settings.chunk_max_num_turns})
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={settings.chunk_max_num_turns}
+                  onChange={(e) => setSettings(prev => ({ ...prev, chunk_max_num_turns: parseInt(e.target.value) }))}
+                  className="w-full"
+                />
+                <div className="text-xs text-gray-500 mt-1">Maximum speaker turns per chunk</div>
+              </div>
+            )}
+
+            {(settings.chunk_method === 'word' || settings.chunk_method === 'speaker') && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Chunk Buffer Size ({settings.generation_chunk_buffer_size})
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={settings.generation_chunk_buffer_size}
+                  onChange={(e) => setSettings(prev => ({ ...prev, generation_chunk_buffer_size: parseInt(e.target.value) }))}
+                  className="w-full"
+                />
+                <div className="text-xs text-gray-500 mt-1">Number of chunks to buffer during generation</div>
+              </div>
+            )}
+
+                         <div className="md:col-span-2 lg:col-span-3">
+               <label className="block text-sm font-medium text-gray-700 mb-2">Scene Description</label>
+               <input
+                 type="text"
+                 value={settings.scene_description}
+                 onChange={(e) => setSettings(prev => ({ ...prev, scene_description: e.target.value }))}
+                 placeholder="e.g., Professional podcast studio with energetic hosts"
+                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+               />
+             </div>
+
+             {/* Experimental Features */}
+             <div className="md:col-span-2 lg:col-span-3">
+               <h4 className="text-sm font-medium text-gray-700 mb-3">🧪 Experimental Features</h4>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <div className="space-y-3">
+                   <label className="flex items-center space-x-3">
+                     <input
+                       type="checkbox"
+                       checked={settings.experimental_features.humming}
+                       onChange={(e) => setSettings(prev => ({
+                         ...prev,
+                         experimental_features: {
+                           ...prev.experimental_features,
+                           humming: e.target.checked
+                         }
+                       }))}
+                       className="w-4 h-4 text-orange-500 rounded"
+                     />
+                     <div>
+                       <span className="text-sm font-medium text-gray-700">Humming Mode</span>
+                       <p className="text-xs text-gray-500">Enable voice humming capabilities</p>
+                     </div>
+                   </label>
+                   
+                   <label className="flex items-center space-x-3">
+                     <input
+                       type="checkbox"
+                       checked={settings.experimental_features.bgm}
+                       onChange={(e) => setSettings(prev => ({
+                         ...prev,
+                         experimental_features: {
+                           ...prev.experimental_features,
+                           bgm: e.target.checked
+                         }
+                       }))}
+                       className="w-4 h-4 text-orange-500 rounded"
+                     />
+                     <div>
+                       <span className="text-sm font-medium text-gray-700">Background Music</span>
+                       <p className="text-xs text-gray-500">Add background music to speech</p>
+                     </div>
+                   </label>
+                 </div>
+                 
+                 <div className="space-y-3">
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700 mb-2">
+                       RAS Window Length ({settings.ras_win_len})
+                     </label>
+                     <input
+                       type="range"
+                       min="0"
+                       max="10"
+                       step="1"
+                       value={settings.ras_win_len}
+                       onChange={(e) => setSettings(prev => ({ ...prev, ras_win_len: parseInt(e.target.value) }))}
+                       className="w-full"
+                     />
+                     <div className="text-xs text-gray-500 mt-1">Reference audio window length (0 = disabled)</div>
+                   </div>
+                   
+                   <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
+                     ⚠️ Experimental features may be unstable and are subject to change in future versions.
+                   </div>
+                 </div>
+               </div>
+             </div>
           </div>
         )}
       </div>
